@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {SoftwareRenderer} from './software.js?v=2';
-import {trackBulkFront} from './front-tracking.js';
+import {trackBulkFront} from './front-tracking.js?v=4';
 const $=id=>document.getElementById(id), clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const fmt=(x,n=0)=>Number(x).toLocaleString('en-US',{minimumFractionDigits:n,maximumFractionDigits:n});
 let terrain,renderer,scene,camera,orbit,mountain,contours,particles,trail,lineGeom,releasePoint,motionTrails;
@@ -132,7 +132,7 @@ function drawFrame(t){
  }particles.instanceMatrix.needsUpdate=true;if(particles.instanceColor)particles.instanceColor.needsUpdate=true;
  const bulk=(r<.5?f.front:f2.front)??f.front;
  if(bulk&&t>.3){
-  if(bulk.status==='outside'){$('frontTag').hidden=true;$('frontTag').dataset.state='outside';$('frontTag').title='主体前缘已流出公开 DEM，后续运动未模拟';}
+  if(bulk.status==='outside'){$('frontTag').hidden=true;$('frontTag').dataset.state='outside';$('frontTag').title='主体前缘已部分流出公开 DEM，域外前缘无法继续追踪';}
   else{const k=bulk.index*5,x=a[k]+(b[k]-a[k])*r,y=a[k+1]+(b[k+1]-a[k+1])*r,h=a[k+2]+(b[k+2]-a[k+2])*r;
    if((r===0?a[k+4]:b[k+4])>.5)frontPoint=pos(x,y,(enhanced?9:4)+Math.min(h,10)*.4);
    $('frontTag').dataset.state=bulk.status;$('frontTag').title='最大连通物料主体，沿流向的 98.5% 体积分位前沿';
@@ -154,7 +154,7 @@ function drawFrame(t){
  const st={};for(const k of Object.keys(f.stats))st[k]=f.stats[k]+(f2.stats[k]-f.stats[k])*r;
  $('maxSpeed').textContent=fmt(st.vmax,1);$('runout').textContent=fmt(st.runout);$('moving').textContent=fmt(st.moving*100,1);$('timeVal').textContent=fmt(t,1);$('timeline').value=t;
  $('speedNote').textContent=t<.2?'静止的初始释放区':`平均速度 ${fmt(st.vmean,1)} m/s`;
- $('phaseBadge').textContent=t<.2?'● 待释放':bulk?.status==='outside'?'◌ 主体前缘已流出 DEM':st.escaped>.05?'◌ 部分流出计算域':st.moving<.02?'● 基本停积':'● 正在运移';
+ $('phaseBadge').textContent=t<.2?'● 待释放':bulk?.status==='outside'?'◌ 主体前缘已部分流出 DEM':st.escaped>.05?'◌ 部分流出计算域':st.moving<.02?'● 基本停积':'● 正在运移';
  $('boundaryNote').textContent=st.escaped>.005?`已有 ${fmt(st.escaped*100,1)}% 体积流出 DEM，后续未模拟`:(snow?'无侵蚀卷入 · 无粉雪云':'同一地形对照 · 非历史事故复现');
  $('releaseTagSub').textContent=snow?`公开边界 · 初始厚度 ${activeParams.thickness.toFixed(1)} m`:`文献参数 · V₀ ${fmt(activeParams.volume)} m³`;
  const verts=lineGeom.attributes.position;let count=0;for(let i=0;i<=idx;i++)if(frames[i].center){const p=pos(...frames[i].center,10);verts.setXYZ(count++,p.x,p.y,p.z);}verts.needsUpdate=true;lineGeom.setDrawRange(0,count);lineGeom.computeBoundingSphere();frameId=idx;chartDirty=true;

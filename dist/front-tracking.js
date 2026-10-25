@@ -7,7 +7,11 @@ export function trackBulkFront(positions,options={}){
  const {previousPositions=null,initialPositions=null,previous=null,weights=null,cell=15}=options;
  if(previous?.status==='outside')return {...previous,status:'outside'};
  if(previous?.support?.length>=3){let lost=0,total=0;for(const i of previous.support){const w=weights?.[i]??1;total+=w;if(positions[i*5+4]<.5)lost+=w;}
-  if(lost>total*.4)return {...previous,status:'outside'};
+  // A leading band can drain one parcel per saved frame. Waiting for 40% to
+  // disappear in ONE frame kept assigning a new front to the trailing body.
+  // Once any supported part of the bulk front exits, its full position beyond
+  // the DEM is unknown. Keep that boundary state instead of inventing a toe.
+  if(lost>0&&total>0)return {...previous,status:'outside'};
  }
  const bins=new Map(),points=[],size=cell*2;
  for(let i=0;i<positions.length/5;i++){

@@ -30,6 +30,8 @@ const lead=trackBulkFront(a,{previousPositions:previous});
 for(const i of lead.support)gone[i*5+4]=0;
 const exited=trackBulkFront(gone,{previous:lead,previousPositions:a});
 assert.equal(exited.status,'outside');assert.equal(exited.x,lead.x);assert.equal(exited.y,lead.y);
+const gradual=a.slice();gradual[lead.support[0]*5+4]=0;
+assert.equal(trackBulkFront(gradual,{previous:lead,previousPositions:a}).status,'outside','gradual one-parcel boundary exits must not reassign the front');
 assert.equal(trackBulkFront(a,{previous:exited}).status,'outside');
 const rewind=trackBulkFront(a,{previousPositions:previous});assert.deepEqual(rewind,lead,'seeking backwards must reproduce the same front');
 
@@ -37,4 +39,18 @@ const stopped=body.slice();for(let i=0;i<20;i++)stopped[i*5+3]=0;
 assert.equal(trackBulkFront(stopped,{initialPositions:starts}).status,'stopped');
 assert.equal(trackBulkFront(frame([[0,0,0]]),{initialPositions:frame([[0,0,0]])}),null);
 assert.equal(trackBulkFront(frame([[0,0,4,0]])),null);
+// Integration regression: use the public DEM and the browser worker's exact
+// sampling schedule, where the leading band exits gradually, not all at once.
+const {Simulation}=await import('../dist/physics.js');
+const fs=await import('node:fs');
+const dem=JSON.parse(fs.readFileSync(new URL('../dist/terrain.json',import.meta.url)));
+const slide=new Simulation(dem,{mode:'slide',mu:Math.tan(18*Math.PI/180)});
+let next=0,vmax=0,bulk=null,last=null,first=null;
+while(slide.time<90-1e-6){
+ if(slide.time>=next-1e-6){const snap=slide.snapshot();first??=snap.positions;
+  bulk=snap.time>.3?trackBulkFront(snap.positions,{previousPositions:last,initialPositions:first,previous:bulk,weights:slide.q,cell:dem.cell}):null;last=snap.positions;next+=.75;}
+ const dt=Math.min(.1,.28*dem.cell/(vmax+Math.sqrt(9.81*Math.max(1,slide.initialDepth))),next-slide.time,90-slide.time);
+ vmax=slide.step(Math.max(1e-6,dt));
+}
+assert.equal(bulk?.status,'outside','public-DEM slide must report front exit rather than track remaining tail');
 console.log('Bulk-front tracking: outlier, geometric front, stationary toe, turn, domain exit, rewind and empty-state checks passed');
