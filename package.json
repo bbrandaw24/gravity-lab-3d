@@ -1,0 +1,1 @@
+{"name":"gravity-lab-3d","private":true,"type":"module","scripts":{"test":"node tests/physics.mjs"}}
