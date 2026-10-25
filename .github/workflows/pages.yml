@@ -1,0 +1,58 @@
+name: Validate and publish GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Import complete source on first publication
+        if: ${{ hashFiles('dist/index.html') == '' && hashFiles('gravity-lab-source.zip') != '' }}
+        run: |
+          unzip -q gravity-lab-source.zip -d "$RUNNER_TEMP/gravity-lab-import"
+          cp -a "$RUNNER_TEMP/gravity-lab-import/gravity-lab-3d/." .
+          cp gravity-lab-source.zip dist/gravity-lab-source.zip
+          rm gravity-lab-source.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore --source=HEAD -- .github/workflows/pages.yml
+          git add -A
+          git commit -m "Import full simulation source and public datasets"
+          git push origin HEAD:main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check browser scripts
+        run: |
+          node --check dist/app.js
+          node --check dist/software.js
+          node --check dist/worker.js
+      - name: Verify physics invariants and analytical solution
+        run: node tests/physics.mjs
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload static website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
