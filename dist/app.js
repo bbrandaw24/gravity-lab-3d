@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {SoftwareRenderer} from './software.js?v=2';
+import {trackBulkFront} from './front-tracking.js';
 const $=id=>document.getElementById(id), clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const fmt=(x,n=0)=>Number(x).toLocaleString('en-US',{minimumFractionDigits:n,maximumFractionDigits:n});
 let terrain,renderer,scene,camera,orbit,mountain,contours,particles,trail,lineGeom,releasePoint,motionTrails;
-let following=true,frontPoint=null,firstFocus=true;
+let following=true,frontPoint=null,firstFocus=true,parcelVolumes=null;
 const focusTarget=new THREE.Vector3(),focusOffset=new THREE.Vector3(.65,.68,1).normalize();let focusDistance=1400;
 let frames=[],currentTime=0,playing=false,completed=false,worker,mode='snow',params,activeParams,frameId=-1;
 let lastWall=performance.now(),chartDirty=true,dirty=false,cameraMode='perspective';
@@ -90,14 +91,16 @@ function loadPreset(newMode){mode=newMode;document.body.classList.toggle('slide'
 }
 function calculate(){
  worker?.terminate();activeParams={...collectParams()};frames=[];currentTime=0;frameId=-1;completed=false;playing=false;dirty=false;chartDirty=true;
- frontPoint=null;firstFocus=true;motionTrails.geometry.setDrawRange(0,0);$('frontTag').hidden=true;
+ frontPoint=null;parcelVolumes=null;firstFocus=true;motionTrails.geometry.setDrawRange(0,0);$('frontTag').hidden=true;
  $('applyBtn').disabled=true;$('applyBtn').innerHTML='正在计算… <span>◌</span>';$('calcStatus').textContent='按当前参数重新计算运动过程';$('playBtn').disabled=true;$('playBtn').textContent='▶';$('computeLabel').textContent='深度平均求解中';$('timeline').value=0;
  if(particles){scene.remove(particles);particles.geometry.dispose();particles.material.dispose();particles=null;}
- worker=new Worker('./worker.js',{type:'module'});const computation=worker;
+ worker=new Worker('./worker.js?v=3',{type:'module'});const computation=worker;
  worker.onmessage=e=>{
   if(worker!==computation)return;
+  if(e.data.type==='init'){parcelVolumes=e.data.volumes;return;}
   if(e.data.type==='frame'){
-   const f=e.data.frame;frames.push(f);const a=f.positions;f.center=f.stats.escaped<.99999?[f.stats.centerX,f.stats.centerY]:null;
+   const f=e.data.frame,previousFrame=frames.at(-1);f.front=f.time>.3?trackBulkFront(f.positions,{previousPositions:previousFrame?.positions,initialPositions:frames[0]?.positions,previous:previousFrame?.front,weights:parcelVolumes,cell:terrain.cell}):null;
+   frames.push(f);const a=f.positions;f.center=f.stats.escaped<.99999?[f.stats.centerX,f.stats.centerY]:null;
    if(!particles){particles=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,1),new THREE.MeshBasicMaterial(),a.length/5);particles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);particles.frustumCulled=false;scene.add(particles);}
    if(frames.length===1)drawFrame(0);if(frames.length>1)$('playBtn').disabled=false;chartDirty=true;
    $('calcStatus').textContent=`已计算 ${fmt(f.time,0)} / 180 s`;
@@ -111,7 +114,7 @@ function calculate(){
 function drawFrame(t){
  if(!frames.length||!particles)return;const idx=Math.min(frames.length-1,Math.floor(t/.75)),f=frames[idx],f2=frames[Math.min(idx+1,frames.length-1)],r=f2.time>f.time?clamp((t-f.time)/(f2.time-f.time),0,1):0,a=f.positions,b=f2.positions;
  const speedMode=$('speedCheck').checked,snow=mode==='snow',enhanced=$('enhanceCheck').checked;
- let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity,frontDistance=-1;
+ let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
  frontPoint=null;
  for(let n=0;n<particles.count;n++){
   const k=n*5,x=a[k]+(b[k]-a[k])*r,y=a[k+1]+(b[k+1]-a[k+1])*r,h=a[k+2]+(b[k+2]-a[k+2])*r,v=a[k+3]+(b[k+3]-a[k+3])*r,act=r<.5?a[k+4]:b[k+4];
@@ -119,8 +122,7 @@ function drawFrame(t){
    dummy.position.copy(pos(x,y,(enhanced?9:4)+Math.min(h,10)*.4));const sx=(sample(terrain.elevation,x+15,y)-sample(terrain.elevation,x-15,y))/30,sy=(sample(terrain.elevation,x,y+15)-sample(terrain.elevation,x,y-15))/30;
    normal.set(-sx,1,-sy).normalize();dummy.quaternion.setFromUnitVectors(up,normal);const size=enhanced?(v>.5||t<.3?10:7):(snow?4.7:4);
    dummy.scale.set(size,enhanced?clamp(h,2.2,7):clamp(h*.45,1,4),size);
-   if(v>.5||t<.3){minX=Math.min(minX,dummy.position.x);maxX=Math.max(maxX,dummy.position.x);minY=Math.min(minY,dummy.position.y);maxY=Math.max(maxY,dummy.position.y);minZ=Math.min(minZ,dummy.position.z);maxZ=Math.max(maxZ,dummy.position.z);
-    const initial=frames[0].positions,displacement=Math.hypot(x-initial[k],y-initial[k+1]);if(t>.3&&displacement>frontDistance){frontDistance=displacement;frontPoint=dummy.position.clone();}}
+   if(v>.5||t<.3){minX=Math.min(minX,dummy.position.x);maxX=Math.max(maxX,dummy.position.x);minY=Math.min(minY,dummy.position.y);maxY=Math.max(maxY,dummy.position.y);minZ=Math.min(minZ,dummy.position.z);maxZ=Math.max(maxZ,dummy.position.z);}
   }
   dummy.updateMatrix();particles.setMatrixAt(n,dummy.matrix);
   if(speedMode){const z=clamp(v/60,0,1);if(z<.5)color.set('#4489b9').lerp(new THREE.Color('#63c3b1'),z*2);else if(z<.8)color.set('#63c3b1').lerp(new THREE.Color('#e8cd69'),(z-.5)/.3);else color.set('#e8cd69').lerp(new THREE.Color('#d9673e'),(z-.8)/.2);}
@@ -128,8 +130,20 @@ function drawFrame(t){
   else color.set(snow?(n%4===0?'#c2dce4':'#f6fbff'):(n%4===0?'#8e633f':'#b18b5d'));
   particles.setColorAt(n,color);
  }particles.instanceMatrix.needsUpdate=true;if(particles.instanceColor)particles.instanceColor.needsUpdate=true;
+ const bulk=(r<.5?f.front:f2.front)??f.front;
+ if(bulk&&t>.3){
+  if(bulk.status==='outside'){$('frontTag').hidden=true;$('frontTag').dataset.state='outside';$('frontTag').title='主体前缘已流出公开 DEM，后续运动未模拟';}
+  else{const k=bulk.index*5,x=a[k]+(b[k]-a[k])*r,y=a[k+1]+(b[k+1]-a[k+1])*r,h=a[k+2]+(b[k+2]-a[k+2])*r;
+   if((r===0?a[k+4]:b[k+4])>.5)frontPoint=pos(x,y,(enhanced?9:4)+Math.min(h,10)*.4);
+   $('frontTag').dataset.state=bulk.status;$('frontTag').title='最大连通物料主体，沿流向的 98.5% 体积分位前沿';
+   const label=$('frontTag').querySelector('span');label.firstChild.textContent=bulk.status==='stopped'?'停积前缘 ':'主体前缘 ';label.querySelector('small').textContent='主流动体 · 排除离群颗粒';
+  }
+ }
  if(Number.isFinite(minX)){focusTarget.set((minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2);
   const span=Math.max(maxX-minX,maxY-minY,maxZ-minZ);focusDistance=clamp(span*2.5/Math.min(1,camera.aspect),1100,7200);
+  if(frontPoint){const center=pos(...bulk.center,0);focusTarget.copy(center).lerp(frontPoint,.65);const bounds=bulk.bounds;
+   const coreSpan=Math.max(bounds[2]-bounds[0],bounds[3]-bounds[1],Math.abs(center.y-frontPoint.y));focusDistance=clamp(coreSpan*2.7/Math.min(1,camera.aspect),1100,7200);}
+  else if(bulk?.status==='outside')focusTarget.copy(pos(bulk.x,bulk.y,9));
   if(following&&firstFocus){orbit.target.copy(focusTarget);camera.position.copy(focusTarget).addScaledVector(focusOffset,focusDistance);firstFocus=false;}}
  const ma=motionTrails.geometry.attributes.position;let mc=0;
  if(enhanced&&t>.75)for(let n=0;n<particles.count;n+=75){const k=n*5;if(a[k+4]<.5||a[k+3]<=.5)continue;
@@ -140,7 +154,7 @@ function drawFrame(t){
  const st={};for(const k of Object.keys(f.stats))st[k]=f.stats[k]+(f2.stats[k]-f.stats[k])*r;
  $('maxSpeed').textContent=fmt(st.vmax,1);$('runout').textContent=fmt(st.runout);$('moving').textContent=fmt(st.moving*100,1);$('timeVal').textContent=fmt(t,1);$('timeline').value=t;
  $('speedNote').textContent=t<.2?'静止的初始释放区':`平均速度 ${fmt(st.vmean,1)} m/s`;
- $('phaseBadge').textContent=t<.2?'● 待释放':st.escaped>.05?'◌ 部分流出计算域':st.moving<.02?'● 基本停积':'● 正在运移';
+ $('phaseBadge').textContent=t<.2?'● 待释放':bulk?.status==='outside'?'◌ 主体前缘已流出 DEM':st.escaped>.05?'◌ 部分流出计算域':st.moving<.02?'● 基本停积':'● 正在运移';
  $('boundaryNote').textContent=st.escaped>.005?`已有 ${fmt(st.escaped*100,1)}% 体积流出 DEM，后续未模拟`:(snow?'无侵蚀卷入 · 无粉雪云':'同一地形对照 · 非历史事故复现');
  $('releaseTagSub').textContent=snow?`公开边界 · 初始厚度 ${activeParams.thickness.toFixed(1)} m`:`文献参数 · V₀ ${fmt(activeParams.volume)} m³`;
  const verts=lineGeom.attributes.position;let count=0;for(let i=0;i<=idx;i++)if(frames[i].center){const p=pos(...frames[i].center,10);verts.setXYZ(count++,p.x,p.y,p.z);}verts.needsUpdate=true;lineGeom.setDrawRange(0,count);lineGeom.computeBoundingSphere();frameId=idx;chartDirty=true;
@@ -155,8 +169,8 @@ function drawChart(){
 function animate(wall){
  const dt=Math.min(.06,(wall-lastWall)/1000);lastWall=wall;
  if(playing&&frames.length>1){const max=frames.at(-1).time;currentTime=Math.min(currentTime+dt*+$('rateSelect').value,max);drawFrame(currentTime);if(completed&&currentTime>=180){playing=false;$('playBtn').textContent='▶';$('playBtn').setAttribute('aria-label','重新播放');}}
- if(following){const target=orbit.target.clone().lerp(focusTarget,.12);orbit.target.copy(target);const desired=target.clone().addScaledVector(focusOffset,focusDistance);camera.position.lerp(desired,.12);}
- orbit.update();const p=releasePoint.clone().project(camera),w=$('viewport').clientWidth,h=$('viewport').clientHeight;$('releaseTag').style.left=`${(p.x*.5+.5)*w}px`;$('releaseTag').style.top=`${(-p.y*.5+.5)*h}px`;$('releaseTag').hidden=p.z>1||Math.abs(p.x)>1||Math.abs(p.y)>1;
+ if(following){const alpha=1-Math.exp(-dt/0.22),target=orbit.target.clone().lerp(focusTarget,alpha);orbit.target.copy(target);const desired=target.clone().addScaledVector(focusOffset,focusDistance);camera.position.lerp(desired,alpha);}
+ orbit.update();camera.updateMatrixWorld(true);const p=releasePoint.clone().project(camera),w=$('viewport').clientWidth,h=$('viewport').clientHeight;$('releaseTag').style.left=`${(p.x*.5+.5)*w}px`;$('releaseTag').style.top=`${(-p.y*.5+.5)*h}px`;$('releaseTag').hidden=p.z>1||Math.abs(p.x)>1||Math.abs(p.y)>1;
  if(frontPoint&&$('enhanceCheck').checked){const f=frontPoint.clone().project(camera);$('frontTag').style.left=`${(f.x*.5+.5)*w}px`;$('frontTag').style.top=`${(-f.y*.5+.5)*h}px`;$('frontTag').hidden=f.z>1||Math.abs(f.x)>1||Math.abs(f.y)>1;}else $('frontTag').hidden=true;
  renderer.render(scene,camera);if(chartDirty)drawChart();requestAnimationFrame(animate);
 }

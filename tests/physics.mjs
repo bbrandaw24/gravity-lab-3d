@@ -29,3 +29,4 @@ const f=sim.snapshot();assert.ok(f.stats.vmax>0&&f.stats.vmax<150);assert.ok([..
 const high=new Simulation(real,{mode:'snow',mu:.45});for(let i=0;i<200;i++)high.step(.05);
 assert.ok(high.snapshot().stats.vmean<f.stats.vmean,'increased friction must lower early mean speed');
 console.log(JSON.stringify({checks:'passed',inclinedPlaneRelativeError:Math.abs(speed-expected)/expected,volumeRelativeError:Math.abs(projected-activeVolume)/sim.volume,publicDEMSpeed10s:f.stats.vmean,highFrictionSpeed10s:high.snapshot().stats.vmean},null,2));
+await import('./front-tracking.mjs');

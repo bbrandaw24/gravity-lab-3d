@@ -2,6 +2,7 @@ import {Simulation} from './physics.js';
 let token=0;
 self.onmessage=async e=>{
  const id=++token,{terrain,params}=e.data,sim=new Simulation(terrain,params);let next=0,vmax=0;
+ self.postMessage({type:'init',volumes:sim.q});
  const end=180;
  while(sim.time<end-1e-6){
   if(id!==token)return;
