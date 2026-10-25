@@ -24,6 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Apply bulk-front tracking fix
+        if: ${{ hashFiles('tracking-fix.zip') != '' }}
+        run: |
+          unzip -oq tracking-fix.zip
+          rm tracking-fix.zip
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix bulk-front selection and camera-marker alignment"
+          git push origin HEAD:main
       - name: Import complete source on first publication
         if: ${{ hashFiles('dist/index.html') == '' && hashFiles('gravity-lab-source.zip') != '' }}
         run: |
